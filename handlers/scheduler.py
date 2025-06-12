@@ -3,7 +3,6 @@ from pyrogram import filters
 from pyrogram.types import Message
 from pyrogram.enums import ChatMemberStatus
 from utils.db import is_user_authorized
-from utils.nsfw import download_and_check
 
 def register(app):
     @app.on_edited_message(filters.group)
