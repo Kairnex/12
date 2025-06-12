@@ -1,24 +1,38 @@
 
-import asyncio
-from pyrogram import Client
-from pyrogram.enums import MessageMediaType
+from pyrogram import filters
+from pyrogram.types import Message
+from pyrogram.enums import ChatMemberStatus
+from utils.db import is_user_authorized
+from utils.nsfw import download_and_check
 
-def register(app: Client):
-    async def auto_clean():
-        while True:
-            async for dialog in app.get_dialogs():
-                if dialog.chat.type == "supergroup":
-                    await app.delete_messages(dialog.chat.id, range(dialog.top_message_id - 200, dialog.top_message_id), revoke=True)
-            await asyncio.sleep(86400)  # 24 hours
+def register(app):
+    @app.on_edited_message(filters.group)
+    async def delete_edits(app, message: Message):
+        try:
+            member = await app.get_chat_member(message.chat.id, message.from_user.id)
+            if member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+                return
+            if is_user_authorized(message.chat.id, message.from_user.id):
+                return
+            await message.delete()
+        except Exception as e:
+            print(f"[EDIT DELETE ERROR] {e}")
 
-    async def auto_clean_media():
-        while True:
-            async for dialog in app.get_dialogs():
-                if dialog.chat.type == "supergroup":
-                    async for msg in app.get_chat_history(dialog.chat.id, limit=100):
-                        if msg.media:
-                            await app.delete_messages(dialog.chat.id, msg.id)
-            await asyncio.sleep(7200)  # 2 hours
+    @app.on_message(filters.group & (filters.photo | filters.video | filters.document))
+    async def filter_nsfw_media(app, message: Message):
+        try:
+            if await download_and_check(app, message):
+                await message.delete()
+        except Exception as e:
+            print(f"[NSFW MEDIA DELETE ERROR] {e}")
 
-    app.loop.create_task(auto_clean())
-    app.loop.create_task(auto_clean_media())
+    @app.on_message(filters.group & filters.text)
+    async def filter_nsfw_text(app, message: Message):
+        NSFW_KEYWORDS = ["porn", "sex", "nude", "boobs", "xxx"]
+        try:
+            if any(word in message.text.lower() for word in NSFW_KEYWORDS):
+                member = await app.get_chat_member(message.chat.id, message.from_user.id)
+                if member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+                    await message.delete()
+        except Exception as e:
+            print(f"[NSFW TEXT DELETE ERROR] {e}")
